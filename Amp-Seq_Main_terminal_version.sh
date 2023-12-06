@@ -1,0 +1,489 @@
+#!/bin/bash -l
+# DESCRIPTION
+#   Script used for the generation of OTU-table from amplicon-sequencing data obtained from ONT
+#   This script should be run after "Amp-Seq_Statistics.sh"
+# Authors
+#   Mathias Eskildsen (mk20aj@bio.aau.dk)
+#   Patrick Skov Schaksen (insert mail)
+#
+#   license GNU General Public License
+#
+# TO DO
+#
+# 
+#
+# Make the "run_medaka_consensus" function run as soon as files become available (should speed up the polishing drastically) - Add background job counter loop
+# Add number of threads selection
+# Fix OTU-ID for final OTU-table
+# 
+#
+### DESCRIPTION -------------------------------------------------------------------------
+#project_dir="/user_data/mhe/Pipeline_test_data" ## Define the folder where your outputs should be stored
+#threads=1
+#JobNr=1 ## Number of parallel jobs to run in parallel steps
+#read_cut_off_low=1000 ## Lower boundary to filter of reads (should be decided based upon statistics output)
+#read_cut_off_high=2000 ## Upper boundary to filter of reads (should be decided based upon statistics output)
+#q_score_cutoff=15 ## q-score cut-off 
+#model=r1041_e82_400bps_sup_v4.2.0
+
+
+
+# Usage message
+USAGE="
+-- insert full pipeline name: Workflow for generation of OTU table. Z-clustered OTU consensus polish with Medaka
+usage: $(basename "$0" .sh) [-h] [-o path] [-t value] [-j value] [-l value] [-u value] [-q value] [-m string] [-M] [-r string] [-db path]
+
+
+where:
+    -h Show this help message
+    -o Path where directories and files should be stored (use the same path as in Nanopore Statistics with Nanoplot)
+    -t Number of threads [default = 10]
+    -j Number of parallel jobs [default = 1]
+    -l Minimum length of reads (Check size distribution from statistics)
+    -u Maximum length of reads (Check size distribution from statistics)
+    -q Minimum q-score of reads (Check quality distribution of reads)
+    -m ONT Device and basecalling model [default = r1041_e82_400bps_sup_v4.2.0]
+    -M List available models for medaka polishing
+    -r Method for taxonomic classification, SINTAX or blastn
+    -d Full path to database for taxonomic classication, examples: /space/databases/midas/MiDAS4.8.1_20210702/output/FLASVs_w_sintax.fa or /space/databases/blast/nt_2022_07_28/nt
+"
+
+MODELS="r103_fast_g507, r103_fast_snp_g507, r103_fast_variant_g507, r103_hac_g507, r103_hac_snp_g507, r103_hac_variant_g507, r103_min_high_g345, r103_min_high_g360, r103_prom_high_g360, r103_prom_snp_g3210, r103_prom_variant_g3210, r103_sup_g507, r103_sup_snp_g507, r103_sup_variant_g507, r1041_e82_260bps_fast_g632, r1041_e82_260bps_fast_variant_g632, r1041_e82_260bps_hac_g632, r1041_e82_260bps_hac_v4.0.0, r1041_e82_260bps_hac_v4.1.0, r1041_e82_260bps_hac_variant_g632, r1041_e82_260bps_hac_variant_v4.1.0, r1041_e82_260bps_sup_g632, r1041_e82_260bps_sup_v4.0.0, r1041_e82_260bps_sup_v4.1.0, r1041_e82_260bps_sup_variant_g632, r1041_e82_260bps_sup_variant_v4.1.0, r1041_e82_400bps_fast_g615, r1041_e82_400bps_fast_g632, r1041_e82_400bps_fast_variant_g615, r1041_e82_400bps_fast_variant_g632, r1041_e82_400bps_hac_g615, r1041_e82_400bps_hac_g632, r1041_e82_400bps_hac_v4.0.0, r1041_e82_400bps_hac_v4.1.0, r1041_e82_400bps_hac_v4.2.0, r1041_e82_400bps_hac_variant_g615, r1041_e82_400bps_hac_variant_g632, r1041_e82_400bps_hac_variant_v4.1.0, r1041_e82_400bps_hac_variant_v4.2.0, r1041_e82_400bps_sup_g615, r1041_e82_400bps_sup_v4.0.0, r1041_e82_400bps_sup_v4.1.0, r1041_e82_400bps_sup_v4.2.0, r1041_e82_400bps_sup_variant_g615, r1041_e82_400bps_sup_variant_v4.1.0, r1041_e82_400bps_sup_variant_v4.2.0, r104_e81_fast_g5015, r104_e81_fast_variant_g5015, r104_e81_hac_g5015, r104_e81_hac_variant_g5015, r104_e81_sup_g5015, r104_e81_sup_g610, r104_e81_sup_variant_g610, r10_min_high_g303, r10_min_high_g340, r941_e81_fast_g514, r941_e81_fast_variant_g514, r941_e81_hac_g514, r941_e81_hac_variant_g514, r941_e81_sup_g514, r941_e81_sup_variant_g514, r941_min_fast_g303, r941_min_fast_g507, r941_min_fast_snp_g507, r941_min_fast_variant_g507, r941_min_hac_g507, r941_min_hac_snp_g507, r941_min_hac_variant_g507, r941_min_high_g303, r941_min_high_g330, r941_min_high_g340_rle, r941_min_high_g344, r941_min_high_g351, r941_min_high_g360, r941_min_sup_g507, r941_min_sup_snp_g507, r941_min_sup_variant_g507, r941_prom_fast_g303, r941_prom_fast_g507, r941_prom_fast_snp_g507, r941_prom_fast_variant_g507, r941_prom_hac_g507, r941_prom_hac_snp_g507, r941_prom_hac_variant_g507, r941_prom_high_g303, r941_prom_high_g330, r941_prom_high_g344, r941_prom_high_g360, r941_prom_high_g4011, r941_prom_snp_g303, r941_prom_snp_g322, r941_prom_snp_g360, r941_prom_sup_g507, r941_prom_sup_snp_g507, r941_prom_sup_variant_g507, r941_prom_variant_g303, r941_prom_variant_g322, r941_prom_variant_g360, r941_sup_plant_g610, r941_sup_plant_variant_g610
+Default consensus:  r1041_e82_400bps_sup_v4.2.0
+Default variant:  r1041_e82_400bps_sup_variant_v4.2.0"
+
+# Process command-line options
+while getopts 'o:t:j:l:u:q:m:r:d:Mh' OPTION; do
+    case $OPTION in
+        h) echo "$USAGE"; exit 1;;
+        o) project_dir=$OPTARG;;
+        j) JobNr=$OPTARG;;
+        t) threads=$OPTARG;;
+        m) model=$OPTARG;;
+        l) read_cut_off_low=$OPTARG;;
+        u) read_cut_off_high=$OPTARG;;
+        q) q_score_cutoff=$OPTARG;;
+        M)
+            echo "$MODELS"
+            exit 0;;
+        r) method=$OPTARG;;
+        d) database=$OPTARG;;
+        :) printf "Missing argument for option -$OPTARG\n" >&2; exit 1;;
+        \?) printf "Invalid option -$OPTARG\n" >&2; exit 1;;
+    esac
+done
+
+# Check if the chosen method is blastn and prompt the user
+if [ "$method" == "blastn" ]; then
+    read -p "HEADS UP: You have chosen the method blastn for taxonomic classification. Make sure you have the blastn tool installed and the necessary database configured. Furthermore; blastn will only give you the best hit for the given OTU, however this is not always the correct classification. Do you want to proceed? (y/n): " choice
+    case "$choice" in
+        y|Y ) ;;
+        n|N ) echo "Exiting."; exit 1;;
+        * ) echo "Invalid choice. Exiting."; exit 1;;
+    esac
+fi
+
+# Debugging
+
+
+
+# Check missing arguments
+MISSING="is missing but required. Exiting."
+if [ -z ${project_dir+x} ]; then echo "-o $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${threads+x} ]; then echo "-t missing. Defaulting to 10 threads"; threads=10; fi;
+if [ -z ${JobNr+x} ]; then echo "-j missing. Defaulting to 1 job"; JobNr=1; fi;
+if [ -z ${model+x} ]; then echo "-m missing. Defaulting to model r1041_e82_400bps_sup_v4.2.0"; model=r1041_e82_400bps_sup_v4.2.0; fi;
+if [ -z ${read_cut_off_low+x} ]; then echo "-l $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${read_cut_off_high+x} ]; then echo "-u $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${q_score_cutoff+x} ]; then echo "-q $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${database+x} ]; then echo "-d $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${method+x} ]; then echo "-r $MISSING"; echo "$USAGE"; exit 1; fi;
+
+-set eu 
+#Create directories 
+mkdir -p $project_dir
+mkdir -p $project_dir/0_stats
+mkdir -p $project_dir/1_raw
+mkdir -p $project_dir/2_filtering
+mkdir -p $project_dir/3_fastq-fa
+mkdir -p $project_dir/4_zotus
+mkdir -p $project_dir/5_zotus_cat
+mkdir -p $project_dir/6_medaka
+mkdir -p $project_dir/7_medaka_relabel
+mkdir -p $project_dir/7_medaka_relabel/combined_polished
+mkdir -p $project_dir/8_OTUtable
+mkdir -p $project_dir/8_OTUtable/97
+mkdir -p $project_dir/8_OTUtable/99
+
+
+#load mamba environment
+mamba activate /shared_software/conda/envs/mk20aj@bio.aau.dk/OTUtable
+
+#Filter based upon information gained from "Amp-Seq_Statistics" workflow
+## Directory paths
+input="$project_dir/1_raw" ##Input path to folder containing concatenated .fastq files
+output="$project_dir/2_filtering" ## Output path
+
+# Loop to create output directories for each input file in the output directory
+# Use find to locate files with the pattern "_concatenated.fastq"
+files=$(find "$input"/* -type f -name "*_concatenated.fastq")
+for file in $files; do
+    # Extract the subdirectory name from the file path
+    subdirectory_name=$(basename "$file" _concatenated.fastq)
+    # Construct the output directory path based on the subdirectory name
+    output_dir="${output}/${subdirectory_name}"
+    # Create the output directory if it doesn't exist
+    echo "created directory for $subdirectory_name in $output"
+    mkdir -p "$output_dir"
+done
+
+# Filter reads for q-score and length and trim adapters (22 nt's)
+input="$project_dir/1_raw" # Input path to the folder containing concatenated .fastq files
+output="$project_dir/2_filtering" # Output path
+
+files=($(find "$input"/* -type f -name "*_concatenated.fastq"))
+run_filtering () {
+    # Inputs
+    local file="$1"
+    local output="$2" 
+    local q_score="$3"
+    local threads="$4"
+    local min_length="$5"
+    local max_length="$6"
+    local base_name=$(basename "$file" _concatenated.fastq)
+    local output_file="$output/${base_name}/${base_name}.fastq"
+
+    echo "filtering from $min_length to $max_length and q $q_score in $base_name"
+    # Run chopper with correct settings for the amplicon of interest
+    # Fake cat as chopper can't work directly on previously concatenated file... whack
+    cat $file | chopper \
+        --minlength $min_length \
+        --maxlength $max_length \
+        --headcrop 22 \
+        --tailcrop 22 \
+        -q $q_score \
+        -t $threads \
+        > "$output_file"
+    echo "done filtering from $min_length to $max_length in $base_name"
+}
+
+export -f run_filtering
+
+
+parallel -j $JobNr run_filtering ::: "${files[@]}" ::: "$output" ::: "$q_score_cutoff" ::: $threads ::: "$read_cut_off_low" ::: "$read_cut_off_high"
+
+
+echo "Finished filtering"
+### Done with filtering step
+
+# Change headers '@' -> '>' i.e fastq -> fasta
+
+input="$project_dir/2_filtering"
+output="$project_dir/3_fastq-fa"
+
+files=($(find "$input"/* -type f -name "*.fastq"))
+for file in "${files[@]}"; do
+    # Extract the base file name without extension
+     base_name=$(basename "$file" .fastq)
+     # Define the output file name
+     output_file="$output/${base_name}_newheaders.fa"
+    # Process the file and save the output in the output directory
+    echo "changing '@' headers for $base_name to '>'"
+    sed -n '1~4s/^@/>/p;2~4p' "$file" > "${output_file}"
+done
+
+echo "Finished changing headers"
+# Finished changing headers for reads
+
+# Z-Cluster OTU
+
+input="$project_dir/3_fastq-fa"
+output="$project_dir/4_zotus"
+
+echo "Generating Z-clustered OTU's"
+find "$input" -type f -iname '*.fa' | parallel -j $JobNr --eta vsearch --cluster_unoise {} --minsize 1 --threads $threads --centroids "${output}/{/.}_zotus.fa"
+echo "Finished generating Z-clustered OTU's"
+
+
+echo "Concatenating z-clustered OTU's" 
+cat $project_dir/4_zotus/*.fa > $project_dir/5_zotus_cat/zotus_concatenated.fa
+echo "Finished Concatenatig z-clustered OTU's"
+# Z-Cluster OTU section done
+
+# Medaka Polish section
+echo "Starting polishing outputs saved are in $project_dir/6_medaka"
+
+# Alignment part
+
+input="$project_dir/4_zotus"
+combined="$project_dir/5_zotus_cat/zotus_concatenated.fa"
+output="$project_dir/6_medaka"
+
+files=( "${input}"/*.fa )
+# align reads to assembly
+for file in  "${files[@]}"; do
+    file_prefix=$(basename "$file" | cut -d '_' -f 1)
+    sub_dir=${output}/${file_prefix}
+    mkdir -p $sub_dir
+    output_file=${sub_dir}/${file_prefix}_calls_to_draft
+    mini_align -i ${combined} -r ${file} -m \
+        -p ${output_file} \
+        -t $((threads * JobNr))
+done
+
+
+# Medaka consensus algorithm (2nd step)
+# Run medaka consensus algorithm 
+input="$project_dir/6_medaka"
+output="$project_dir/6_medaka"
+
+files=( $(ls ${input}/*/*.bam) )
+run_medaka_consensus() {
+    # Input
+    local file="$1"
+    local output="$2"
+    local model="$3"
+    local threads="$4"
+    local filepath=$(dirname "$file")
+    local sample=$(basename "$filepath")
+    local output="${filepath}/${sample}_consensus.hdf"
+
+    medaka consensus "$file" \
+    "$output" \
+    --model $model \
+    --threads $threads
+}
+
+# Export the function
+export -f run_medaka_consensus
+
+#Run the medaka consensus function in parallel
+
+parallel -j "$JobNr" run_medaka_consensus ::: "${files[@]}" ::: "$output" ::: "$model" ::: $threads
+
+## Finished running medaka consensus algorithm 
+
+# Medaka stich - creating consensus sequence of polished reads (3rd step)
+# stich consensus sequences 
+input="$project_dir/6_medaka"
+output="$project_dir/6_medaka"
+zotus_dir="$project_dir/4_zotus"
+draft_base="barcode"
+
+files=( "${input}"/*/*.hdf )
+for file in "${files[@]}"; do
+    filepath=$(dirname "${file}")
+    barcode=$(basename "${filepath}")
+
+    # Generate the draft filename based on the barcode
+    draft="${zotus_dir}/${barcode}_newheaders_zotus.fa"
+
+    medaka stitch "${file}" \
+        "${draft}" \
+        "${filepath}/polished.assembly.fasta"
+done
+# Medaka stich finished
+# Renaming files to contain barcode#/BC# for later relabeling of reads
+# Base directory to find sub-directories
+base_directory="$project_dir/6_medaka"
+for dir in "$base_directory"/barcode*; do 
+    if [ -d "$dir" ]; then
+    # Check if the directory contains a file named "polished.assembly.fasta"
+    if [ -e "$dir/polished.assembly.fasta" ]; then
+            # Get the barcode number from the directory name
+            barcode_number="${dir#*barcode}"
+            
+            #Construct new dir name 
+            new_dir_name="BC$barcode_number"
+            # Construct the new filename
+            new_filename="${new_dir_name}_polished.assembly.fasta"
+            # Construct the full path of the new file
+            new_file_path="$dir/$new_filename"
+
+            #rename the file
+            mv "$dir/polished.assembly.fasta" "$new_file_path"
+
+            echo echo "Renamed: $dir/polished.assembly.fasta -> $new_file_path"
+        fi 
+    fi
+done
+
+# Relabel reads 
+
+
+project_dir="/home/bio.aau.dk/mk20aj/test_terminal"
+threads=10
+input="$project_dir/6_medaka"
+output="$project_dir/7_medaka_relabel"
+files=$(find "$input"/* -type f -iname '*.fasta')
+for file in $files; do
+    #Extract first 4 characters of filename
+    barcode=$(basename "$file" | cut -c 1-4)
+ vsearch \
+  --sortbysize $file \
+  --relabel "$barcode." \
+  --threads $threads \
+  --output "${output}/$(basename "${file%.*}")_relabel.fa"
+done
+
+cat $project_dir/7_medaka_relabel/*.fa > $project_dir/7_medaka_relabel/combined_polished/polished_comb_reads.fa
+
+
+## Split the section below into two options: One for using a blastn search to give taxonomy and one a sintax reference database. 
+# 97% clustering using V-search
+input="$project_dir/7_medaka_relabel/combined_polished/polished_comb_reads.fa"
+output="$project_dir/8_OTUtable/97"
+
+vsearch --cluster_fast $input -id 0.97 --threads $threads --relabel OTU_ --sizeout --otutabout $output/otutabe_0.97.tsv --centroids $output/otu_97.fa
+
+# 99% clustering using V-search
+input="$project_dir/7_medaka_relabel/combined_polished/polished_comb_reads.fa"
+output="$project_dir/8_OTUtable/99"
+
+vsearch --cluster_fast $input -id 0.99 --threads $threads --relabel OTU_ --sizeout --otutabout $output/otutabe_0.99.tsv --centroids $output/otu_99.fa
+
+# Defining functions for Sintax or blastn database search:
+taxonomy_sintax() {
+    local input="$1"
+    local output="$2"
+    local database="$3"
+    local threads="$4"
+    local sintax_cutoff="$5"
+
+    vsearch --sintax "$input" -db "$database" --tabbedout "$output/otu_cut.txt" \
+    --threads "$threads" --quiet --sintax_cutoff "$sintax_cutoff" --strand both
+
+    awk -F "\t" 'OFS="\t"{gsub(/;.*/," ",$1);print $1 $4}' "$output/otu_cut.txt" | awk -F ' ' '{print $1"\t"$2}' > "$output/tax2_cut.txt" 
+
+    input2="$(dirname "$input")/otutabe_${sintax_cutoff}.tsv"
+    awk 'BEGIN {FS=OFS="\t"} NR==FNR {hold[$1]=$2; next} {print $0, hold[$1]}' "$output/tax2_cut.txt" "$input2" > "$output/otutable_cut.tsv"
+    
+}
+
+taxonomy_blastn() {
+    local input="$1"
+    local output="$2"
+    local database="$3"
+    local threads="$4"
+    local clustering_percentage="$5"
+
+    blastn -query "$input" -word_size 11 -max_target_seqs 1 -num_threads "$threads" \
+    -evalue 1e-10 -outfmt "6 qseqid sseqid stitle evalue bitscore length pident" \
+    -out "$output/otus_tax.txt" -db "$database"
+
+    #Remove rows containing information regarding statistics
+    awk -F'\t' '{print $1 "\t" $3}' $output/otus_tax.txt > $output/otus_tax_mod.txt
+    #Remove size
+    sed -i 's/;size=[0-9]\+\t/\t/' $output/otus_tax_mod.txt
+    #Remove uncultured rows
+    awk -i inplace -F'\t' '$2 !~ /^[uU]ncultured/' $output/otus_tax_mod.txt
+    #Split words and add suffixes
+    (echo -e "OTU ID\tgenus\tspecies\tnotes"; awk -F'\t' 'BEGIN {OFS="\t"} {split($2, words, " "); print $1, "g__"words[1], "s__"words[2], $2}' $output/otus_tax_mod.txt) > $output/otus_tax_mod1.txt
+    #Rename headers
+    sed -i '1 s/OTU ID/OTU_ID/' "$output/otus_tax_mod1.txt"
+    sed -i '1 s/#OTU ID/OTU_ID/' "$output/otutabe_$clustering_percentage.tsv"
+    #Merge datasets to final OTUtable
+    python3 <<EOF
+    import pandas as pd
+    import sys       
+
+    otus_tax = pd.read_csv("$output/otus_tax_mod1.txt", sep='\t')
+    otutabe = pd.read_csv("$output/otutabe_$clustering_percentage.tsv", sep='\t')
+    merged_data = pd.merge(otutabe, otus_tax, on='OTU_ID', how='right')
+    merged_data.to_csv("$output/OTUtable_$clustering_percentage.tsv", sep='\t', index=False)
+EOF
+}
+
+
+input_97="$project_dir/8_OTUtable/97/otu_97.fa"
+output_97="$project_dir/8_OTUtable/97"
+input_99="$project_dir/8_OTUtable/99/otu_99.fa"
+output_99="$project_dir/8_OTUtable/99"
+
+if [ "$method" = "SINTAX" ]; then
+    taxonomy_sintax "$input_97" "$output_97" "$database" "$threads" 0.97
+    taxonomy_sintax "$input_99" "$output_99" "$database" "$threads" 0.99
+else
+    if [ "$method" = "blastn" ]; then
+    taxonomy_blastn "$input_97" "$output_97" "$database" "$threads" 0.97
+    taxonomy_blastn "$input_99" "$output_99" "$database" "$threads" 0.99
+else
+    echo "Invalid method. Please enter SINTAX or blastn"
+    exit 1
+    fi
+    exit 0
+fi
+
+
+
+
+
+# 2nd tax OTU table with reads more than 1 time and more than 10 times
+
+input="$project_dir/8_OTUtable/97/otutable_cut.tsv"
+output="$project_dir/8_OTUtable/97"
+awk 'FNR == 1{print;next}{sum=0; for(i=3; i<=NF; i++) {sum += $i} if (sum > 1) print}' $input > $output/otutable_tax_filtered_1read_97.tsv
+
+awk 'FNR == 1{print;next}{sum=0; for(i=3; i<=NF; i++) {sum += $i} if (sum > 10) print}' $input > $output/otutable_tax_filtered_10read_97.tsv
+
+
+# 2nd tax OTU table with reads more than 1 time and more than 10 times
+
+input="$project_dir/8_OTUtable/99/otutable_cut.tsv"
+output="$project_dir/8_OTUtable/99"
+awk 'FNR == 1{print;next}{sum=0; for(i=3; i<=NF; i++) {sum += $i} if (sum > 1) print}' $input > $output/otutable_tax_filtered_1read_99.tsv
+
+awk 'FNR == 1{print;next}{sum=0; for(i=3; i<=NF; i++) {sum += $i} if (sum > 10) print}' $input > $output/otutable_tax_filtered_10read_99.tsv
+
+##### V-search tax and clustering finished 
+
+# Python script to extract and print taxonomy into correct columns
+# 97% >1 read
+input="$project_dir/8_OTUtable/97/otutable_tax_filtered_1read_97.tsv"
+output="$project_dir/8_OTUtable/97/otutable_tax_fixed_filtered_1read_97.tsv"
+python3 "$(dirname "$0")/OTU_table_taxonomy.py" "$input" "$output"
+# 97% >10 read
+input="$project_dir/8_OTUtable/97/otutable_tax_filtered_10read_97.tsv"
+output="$project_dir/8_OTUtable/97/otutable_tax_fixed_filtered_10read_97.tsv"
+python3 "$(dirname "$0")/OTU_table_taxonomy.py" "$input" "$output"
+# 99% >1 read
+input="$project_dir/8_OTUtable/99/otutable_tax_filtered_1read_99.tsv"
+output="$project_dir/8_OTUtable/99/otutable_tax_fixed_filtered_1read_99.tsv"
+python3 "$(dirname "$0")/OTU_table_taxonomy.py" "$input" "$output"
+# 99% >10 read
+input="$project_dir/8_OTUtable/99/otutable_tax_filtered_10read_99.tsv"
+output="$project_dir/8_OTUtable/99/otutable_tax_fixed_filtered_10read_99.tsv"
+python3 "$(dirname "$0")/OTU_table_taxonomy.py" "$input" "$output"
+
+# Correct format of taxonomy within coloumns.
+# Modifications
+modifications=(
+  's/kingdom__\([^[:space:]]*\)/k__\1/g'
+  's/phylum__\([^[:space:]]*\)/p__\1/g'
+  's/class__\([^[:space:]]*\)/c__\1/g'
+  's/order__\([^[:space:]]*\)/o__\1/g'
+  's/family__\([^[:space:]]*\)/f__\1/g'
+  's/genus__\([^[:space:]]*\)/g__\1/g'
+  's/species__\([^[:space:]]*\)/s__\1/g'
+)
+for subdir in "$project_dir"/8_OTUtable/*;do
+    if [ -d "$subdir" ]; then
+        for input in "$subdir"/*_fixed_*; do
+            if [ -f "$input" ]; then
+                for modification in "${modifications[@]}"; do
+                echo "Applying modifications $modification to $input"
+                sed -i -e "$modification" "$input"
+                done
+            fi
+        done
+    fi
+done
+
+
+
+
+
+
+
+
+###### TEST SHIT AT BOTTOM 
