@@ -12,18 +12,19 @@
 # 
 # 
 ### DESCRIPTION -------------------------------------------------------------------------
-# Last modified 2023-12-06
+# Last modified 2023-12-12
 
 
 # Usage message
 USAGE="
 -- insert full pipeline name: Workflow for generation of OTU table. Z-clustered OTU consensus polish with Medaka
-usage: $(basename "$0" .sh) [-h] [-o path] [-t value] [-j value] [-l value] [-u value] [-q value] [-m string] [-M] [-r string] [-db path]
+usage: $(basename "$0" .sh) [-h] [-i path] [-o path] [-t value] [-j value] [-l value] [-u value] [-q value] [-m string] [-M] [-r string] [-db path]
 
 
 where:
     -h Show this help message
-    -o Path where directories and files should be stored (use the same path as in Nanopore Statistics with Nanoplot)
+    -i Directory path of unzipped raw ".fastq" files, from statistics workflow, /path/to/unzipped/raw/fastq/1_raw
+    -o Path where directories and files should be stored
     -t Number of threads [default = 10]
     -j Number of parallel jobs [default = 1]
     -l Minimum length of reads (Check size distribution from statistics)
@@ -40,9 +41,10 @@ Default consensus:  r1041_e82_400bps_sup_v4.2.0
 Default variant:  r1041_e82_400bps_sup_variant_v4.2.0"
 
 # Process command-line options
-while getopts 'o:t:j:l:u:q:m:r:d:Mh' OPTION; do
+while getopts 'i:o:t:j:l:u:q:m:r:d:Mh' OPTION; do
     case $OPTION in
         h) echo "$USAGE"; exit 1;;
+        i) input_fastq=$OPTARG;;
         o) project_dir=$OPTARG;;
         j) JobNr=$OPTARG;;
         t) threads=$OPTARG;;
@@ -76,6 +78,7 @@ fi
 
 # Check missing arguments
 MISSING="is missing but required. Exiting."
+if [ -z ${input_fastq+x} ]; then echo "-i $MISSING"; echo "$USAGE"; exit 1; fi;
 if [ -z ${project_dir+x} ]; then echo "-o $MISSING"; echo "$USAGE"; exit 1; fi;
 if [ -z ${threads+x} ]; then echo "-t missing. Defaulting to 10 threads"; threads=10; fi;
 if [ -z ${JobNr+x} ]; then echo "-j missing. Defaulting to 1 job"; JobNr=1; fi;
@@ -89,8 +92,6 @@ if [ -z ${method+x} ]; then echo "-r $MISSING"; echo "$USAGE"; exit 1; fi;
 -set eu 
 #Create directories 
 mkdir -p $project_dir
-mkdir -p $project_dir/0_stats
-mkdir -p $project_dir/1_raw
 mkdir -p $project_dir/2_filtering
 mkdir -p $project_dir/3_fastq-fa
 mkdir -p $project_dir/4_zotus
@@ -107,7 +108,7 @@ mkdir -p $project_dir/8_OTUtable/99
 mamba activate OTUtable
 
 #Filter based upon information gained from "Amp-Seq_Statistics" workflow
-input="$project_dir/1_raw" ##Input path to folder containing concatenated .fastq files
+input="$input_fastq" ##Input path to folder containing concatenated .fastq files
 output="$project_dir/2_filtering" ## Output path
 
 # Loop to create output directories for each input file in the output directory
@@ -121,7 +122,7 @@ for file in $files; do
 done
 
 # Filter reads for q-score and length and trim adapters (22 nt's)
-input="$project_dir/1_raw"
+input="$input_fastq"
 output="$project_dir/2_filtering"
 
 files=($(find "$input"/* -type f -name "*_concatenated.fastq"))
@@ -150,7 +151,7 @@ run_filtering () {
 
 export -f run_filtering
 
-parallel -j $JobNr run_filtering ::: "${files[@]}" ::: "$output" ::: "$q_score_cutoff" ::: $threads ::: "$read_cut_off_low" ::: "$read_cut_off_high"
+parallel -j $JobNr run_filtering ::: "${files[@]}" ::: "$output" ::: "$q_score_cutoff" ::: $((threads / JobNr)) ::: "$read_cut_off_low" ::: "$read_cut_off_high"
 
 echo "Finished filtering"
 
@@ -176,7 +177,7 @@ input="$project_dir/3_fastq-fa"
 output="$project_dir/4_zotus"
 
 echo "Generating Z-clustered OTU's"
-find "$input" -type f -iname '*.fa' | parallel -j $JobNr --eta vsearch --cluster_unoise {} --minsize 1 --threads $threads --centroids "${output}/{/.}_zotus.fa"
+find "$input" -type f -iname '*.fa' | parallel -j $JobNr --eta vsearch --cluster_unoise {} --minsize 1 --threads $((threads / JobNr)) --centroids "${output}/{/.}_zotus.fa"
 echo "Finished generating Z-clustered OTU's"
 
 
@@ -201,7 +202,7 @@ for file in  "${files[@]}"; do
     output_file=${sub_dir}/${file_prefix}_calls_to_draft
     mini_align -i ${combined} -r ${file} -m \
         -p ${output_file} \
-        -t $((threads * JobNr))
+        -t $threads
 done
 
 # Medaka consensus algorithm (2nd step)
@@ -226,7 +227,7 @@ run_medaka_consensus() {
 }
 export -f run_medaka_consensus
 
-parallel -j "$JobNr" run_medaka_consensus ::: "${files[@]}" ::: "$output" ::: "$model" ::: $threads
+parallel -j "$JobNr" run_medaka_consensus ::: "${files[@]}" ::: "$output" ::: "$model" ::: $((threads / JobNr))
 
 # Medaka stich - creating consensus sequence of polished reads (3rd step)
 input="$project_dir/6_medaka"
@@ -270,8 +271,6 @@ for dir in "$base_directory"/barcode*; do
 done
 
 # Relabel reads using vsearch
-project_dir="/home/bio.aau.dk/mk20aj/test_terminal"
-threads=10
 input="$project_dir/6_medaka"
 output="$project_dir/7_medaka_relabel"
 files=$(find "$input"/* -type f -iname '*.fasta')
