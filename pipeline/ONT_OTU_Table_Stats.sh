@@ -14,13 +14,14 @@
 # Make use of only one conda environment
 # Change default values to match "standard setup"
 ### DESCRIPTION -------------------------------------------------------------------------
+#Last modified on 2023-12-12
 USAGE="
 -- insert full pipeline name: Nanopore Statistics with NanoPlot
-usage: $(basename "$0" .sh) [-h] [-o path] [-i path] [-t value]
+usage: $(basename "$0" .sh) [-h] [-o path] [-i path] [-t value] [-j value]
 
 where:
     -h Show this help message.
-    -o Path where directories and files should be stored
+    -o Path where directories should be created and files should be stored
     -i Full path to .fastq.gz files from Nanopore, example: /Full/Path/to/nanopore_data/ONT_RUN_ID/fastq_pass  
     -j Number of parallel jobs [default = 1]
     -t Number of threads [default = 1]
@@ -40,33 +41,17 @@ done
 
 # Check missing arguments
 MISSING="is missing but required. Exiting."
-if [ "$project_dir" = "/user_data/mhe/Pipeline_test_data" ]; then
-    echo "-o $MISSING"
-    echo "$USAGE"
-    exit 1
-fi
-
-if [ "$input_fastq" = "/user_data/mhe/Pipeline_test_data/fastq" ]; then
-    echo "-i $MISSING"
-    echo "$USAGE"
-    exit 1
-fi
-
-if [ -z "$JobNr" ]; then
-    JobNr=1
-    echo "No value given, using default=1"
-fi
-
-if [ "$threads" -eq 1 ]; then
-    threads=1
-    echo "No value given, using default=1"
-fi
-
+if [ -z ${project_dir+x} ]; then echo "-o $MISSING"; echo "$USAGE"; exit 1; fi;
+if [ -z ${threads+x} ]; then echo "-t missing. Defaulting to 10 threads"; threads=10; fi;
+if [ -z ${JobNr+x} ]; then echo "-j missing. Defaulting to 1 job"; JobNr=1; fi;
+if [ -z ${input_fastq+x} ]; then echo "-i $MISSING"; echo "$USAGE"; exit 1; fi; 
 
 echo "project_dir: $project_dir"
 echo "input_fastq: $input_fastq"
 echo "JobNr": $JobNr
 echo "Treads: $threads"
+
+set -eu
 
 #Create directories 
 mkdir -p $project_dir
@@ -119,10 +104,6 @@ done
 
 
 # Start of statistics workflow 
-eval "$(conda shell.bash hook)"
-
-conda activate /shared_software/conda/envs/mk20aj@bio.aau.dk/OTUtable
-
 input="$project_dir/1_raw"
 output="$project_dir/0_stats"
 
@@ -168,7 +149,7 @@ statistics() {
 export -f statistics
 
 module load parallel/20220722-GCCcore-11.3.0
-parallel -j "$JobNr" statistics ::: "${files[@]}" ::: "$threads" ::: "$output_dir" 
+parallel -j "$JobNr" statistics ::: "${files[@]}" ::: $((threads / JobNr)) ::: "$output_dir" 
 module purge
 
 
