@@ -1,4 +1,6 @@
 # ONT_OTU_Table
+This repository is deprecated. It has been migrated to a snakemake workflow, this can be found [here](https://github.com/MathiasEskildsen/ONT-AmpSeq). 
+
 ## Description
 Workflow for the generation of OTU-tables from demultiplexed ONT amplicon data.
 The workflow is split into two parts. 
